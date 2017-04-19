@@ -1,0 +1,58 @@
+From 3a8b35264a7eaa4c6f2f8cfd56059a807f2625b7 Mon Sep 17 00:00:00 2001
+From: Mirko Damiani <mirko@develer.com>
+Date: Mon, 16 Nov 2015 19:06:54 +0100
+Subject: [PATCH] configure usb ports
+Organization: Develer S.r.l.
+
+---
+ arch/arm/boot/dts/at91-sama5d4_develboard.dts | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard.dts b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+index 1eaba41..d275f8f 100644
+--- a/arch/arm/boot/dts/at91-sama5d4_develboard.dts
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+@@ -133,6 +133,13 @@
+ 						>;
+ 					};
+ 				};
++				usb1 {
++					pinctrl_usb1_ovcur: usb1_ovcur {
++						atmel,pins = <
++							AT91_PIOE 12 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP /* USB_OVCUR */
++						>;
++					};
++				};
+ 			};
+ 		};
+ 
+@@ -173,6 +180,26 @@
+ 				reg = <0x800000 0x0f800000>;
+ 			};
+ 		};
++
++		usb0: gadget@00400000 {
++			status = "okay";
++		};
++
++		usb1: ohci@00500000 {
++			pinctrl-names = "default";
++			pinctrl-0 = <&pinctrl_usb1_ovcur>;
++			num-ports = <3>;
++			atmel,vbus-gpio = <0
++				&pioE 11 GPIO_ACTIVE_HIGH
++				&pioE 14 GPIO_ACTIVE_HIGH
++			>;
++			atmel,oc-gpio = <&pioE 12 GPIO_ACTIVE_LOW>;
++			status = "okay";
++		};
++
++		usb2: ehci@00600000 {
++			status = "okay";
++		};
+ 	};
+ 
+ 	leds {
+-- 
+1.9.1
+
