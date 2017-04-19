@@ -1,0 +1,152 @@
+#!/bin/sh
+
+[ "x$1" == "xstart" ] \
+|| exit 0
+
+
+# Utility functions
+
+_genrand_dd() {
+	local chunk=/tmp/randchunk.bin
+
+	dd if=/dev/urandom of=$chunk bs=512K count=1 2>/dev/null \
+	|| return 1
+
+	cnt=$(($1*2))
+	while [ $cnt -gt 0 ]; do
+		dd if=$chunk bs=512K count=1 2>/dev/null \
+		|| return 1
+
+		cnt=$(($cnt-1))
+	done
+
+	rm -f $chunk
+	return 0
+}
+
+_genrand_pattern() {
+	local destfile="$1"
+	local dataMiB="$2"
+
+	_genrand_dd ${dataMiB} \
+		| pv -s ${dataMiB}m \
+		| dd of="$destfile" 2>/dev/null \
+	&& return 0 \
+	|| return 1
+}
+
+_wait_device() {
+	local device=$1
+	local tmo_sec=$2
+	while [ ! -b "$device" ]; do
+		[ $tmo_sec -gt 0 ] \
+		|| return 1
+		tmo_sec=$((tmo_sec-1))
+		sleep 1
+	done
+	return 0
+}
+
+_drop_cache() {
+	sync
+	echo 3 > /proc/sys/vm/drop_caches
+}
+
+_md5_check() {
+	[ -f "$1" ] && [ -f "$2" ] \
+	|| return 1
+
+	local c1=$(md5sum "$1" | awk '{print $1}')
+	local c2=$(md5sum "$2" | awk '{print $1}')
+
+	[ "x$c1" == "x$c2" ] \
+	&& return 0 \
+	|| return 1
+}
+
+_test_write_device() {
+	local device="$1"
+	local dataMiB=50
+	local testpat=testpattern.bin
+
+	echo -n "Waiting for $device to appear... "
+	_wait_device $device 5 \
+	|| { echo ERR; echo "No such device: $device"; return 1; }
+	echo OK
+
+	mount $device /media/ \
+	|| return 1
+
+	echo "Generate a random pattern of size $dataMiB MiB"
+	_genrand_pattern /tmp/$testpat $dataMiB \
+	|| return 1
+
+	echo "Writing test pattern to $device..."
+	pv /tmp/$testpat | dd of=/media/$testpat 2>/dev/null \
+	|| return 1
+
+	echo -n "Syncing data to disk... "
+	_drop_cache
+	echo OK
+
+	echo -n "Check test pattern on $device... "
+	_md5_check /tmp/$testpat /media/$testpat
+	retval=$?
+
+	[ $retval -eq 0 ] \
+	&& echo OK \
+	|| echo ERR
+
+	rm -f /media/$testpat
+	umount /media
+	return $retval
+}
+
+_runtest() {
+	local testfun="$1"
+	[ "x$testfun" != "x_runtest" ] \
+	|| return 1
+
+	echo "Execute test $testfun"
+	eval "$testfun"
+	retval=$?
+
+	[ $retval -eq 0 ] \
+	&& echo "Test $testfun: PASS" \
+	|| echo "Test $testfun: FAIL"
+
+	return $retval
+}
+
+
+# Test functions
+
+sdcard() {
+	_test_write_device /dev/mmcblk0p2
+}
+
+usbdisk() {
+	_test_write_device /dev/sda1
+}
+
+board() {
+	_runtest sdcard \
+	&& _runtest usbdisk \
+	&& return 0 \
+	|| return 1
+}
+
+for arg in `cat /proc/cmdline`; do
+	param=`echo $arg | awk 'BEGIN {FS="="} {print $1}'`
+	testfun=`echo $arg | awk 'BEGIN {FS="="} {print $2}'`
+
+	if [ "x$param" == "xtest" ] && [ -n "$testfun" ]; then
+		_runtest "$testfun"
+		retval=$?
+		sleep 1
+
+		[ $retval -eq 0 ] \
+		&& reboot \
+		|| halt
+	fi
+done
