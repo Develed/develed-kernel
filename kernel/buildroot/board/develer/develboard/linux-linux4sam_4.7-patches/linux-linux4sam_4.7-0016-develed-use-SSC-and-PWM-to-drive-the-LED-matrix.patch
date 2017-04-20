@@ -1,0 +1,1588 @@
+From 62055f1b2dbae19b75a280251db868e50108b7cd Mon Sep 17 00:00:00 2001
+From: Pietro Lorefice <pietro@develer.com>
+Date: Thu, 2 Mar 2017 13:17:05 +0100
+Subject: [PATCH] develed: use SSC and PWM to drive the LED matrix
+
+---
+ arch/arm/boot/dts/Makefile                         |   1 +
+ arch/arm/boot/dts/at91-sama5d4_develboard.dts      |   2 +-
+ .../boot/dts/at91-sama5d4_develboard_develed.dts   |  99 ++++++++++
+ arch/arm/boot/dts/sama5d4.dtsi                     |   9 +
+ drivers/Kconfig                                    |   2 +
+ drivers/Makefile                                   |   3 +
+ drivers/develed/Kconfig                            |  21 ++
+ drivers/develed/Makefile                           |   3 +
+ drivers/develed/pwm-ssc.c                          | 213 +++++++++++++++++++++
+ drivers/dma/at_xdmac.c                             |  78 ++++----
+ drivers/misc/Kconfig                               |   5 +-
+ drivers/pwm/core.c                                 |  34 ++++
+ drivers/pwm/pwm-atmel.c                            |  64 ++++++-
+ include/linux/atmel_tc.h                           |  28 +++
+ include/linux/pwm.h                                |  29 +++
+ sound/soc/atmel/Kconfig                            |   9 +
+ sound/soc/atmel/Makefile                           |   4 +
+ sound/soc/atmel/atmel_ssc_dai.c                    |  55 ++++--
+ sound/soc/atmel/atmel_ssc_generic.c                | 181 +++++++++++++++++
+ sound/soc/codecs/Kconfig                           |   4 +
+ sound/soc/codecs/Makefile                          |   2 +
+ sound/soc/codecs/generic.c                         |  91 +++++++++
+ 22 files changed, 884 insertions(+), 53 deletions(-)
+ create mode 100644 arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
+ create mode 100644 drivers/develed/Kconfig
+ create mode 100644 drivers/develed/Makefile
+ create mode 100644 drivers/develed/pwm-ssc.c
+ create mode 100644 sound/soc/atmel/atmel_ssc_generic.c
+ create mode 100644 sound/soc/codecs/generic.c
+
+diff --git a/arch/arm/boot/dts/Makefile b/arch/arm/boot/dts/Makefile
+index 45ac997..1873cee 100644
+--- a/arch/arm/boot/dts/Makefile
++++ b/arch/arm/boot/dts/Makefile
+@@ -80,6 +80,7 @@ dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4_develboard.dtb
+ dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4_develboard_eva01.dtb
+ dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4_develboard_eva01_r2.dtb
+ dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4_develboard_eva01_r3.dtb
++dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4_develboard_develed.dtb
+ 
+ dtb-$(CONFIG_ARCH_ATLAS6) += atlas6-evb.dtb
+ dtb-$(CONFIG_ARCH_AXXIA) += axm5516-amarillo.dtb
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard.dts b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+index cad0913..1f24de7 100644
+--- a/arch/arm/boot/dts/at91-sama5d4_develboard.dts
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+@@ -243,7 +243,7 @@
+ 
+ 	leds {
+ 		compatible = "gpio-leds";
+-		status = "okay";
++		status = "disabled";
+ 
+ 		d10 {
+ 			label = "d10";
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts b/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
+new file mode 100644
+index 0000000..d4a72b1
+--- /dev/null
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
+@@ -0,0 +1,99 @@
++/*
++ * at91-sama5d4_develboard_develed.dts
++ *
++ *  Copyright (C) 2017 Develer,
++ *                2017 Pietro Lorefice <pietro@develer.com>
++ *
++ * This file is dual-licensed: you can use it either under the terms
++ * of the GPL or the X11 license, at your option. Note that this dual
++ * licensing only applies to this file, and not this project as a
++ * whole.
++ *
++ *  a) This file is free software; you can redistribute it and/or
++ *     modify it under the terms of the GNU General Public License as
++ *     published by the Free Software Foundation; either version 2 of the
++ *     License, or (at your option) any later version.
++ *
++ *     This file is distributed in the hope that it will be useful,
++ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *     GNU General Public License for more details.
++ *
++ * Or, alternatively,
++ *
++ *  b) Permission is hereby granted, free of charge, to any person
++ *     obtaining a copy of this software and associated documentation
++ *     files (the "Software"), to deal in the Software without
++ *     restriction, including without limitation the rights to use,
++ *     copy, modify, merge, publish, distribute, sublicense, and/or
++ *     sell copies of the Software, and to permit persons to whom the
++ *     Software is furnished to do so, subject to the following
++ *     conditions:
++ *
++ *     The above copyright notice and this permission notice shall be
++ *     included in all copies or substantial portions of the Software.
++ *
++ *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
++ *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++ *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ *     OTHER DEALINGS IN THE SOFTWARE.
++ */
++#include "at91-sama5d4_develboard.dts"
++
++/ {
++	model = "Atmel SAMA5D4 DevelBoard Develed";
++	compatible = "atmel,sama5d4-develboard-develed", "atmel,sama5d4-develboard", "atmel,sama5d4", "atmel,sama5";
++
++	ahb {
++		apb {
++			pinctrl@fc06a000 {
++				pwm0 {
++					pinctrl_pwm0: pwm0_ssc {
++						atmel,pins = <
++							AT91_PIOA 26 AT91_PERIPH_B AT91_PINCTRL_PULL_DOWN /* PWMH0 */
++							AT91_PIOA 28 AT91_PERIPH_B AT91_PINCTRL_PULL_DOWN /* PWMH1 */
++						>;
++					};
++				};
++			};
++		};
++	};
++
++	pwm-ssc {
++		compatible		= "develed,pwm-ssc";
++		status			= "okay";
++
++		develed,clk-pwm		= <0 300 150 0>;
++		develed,sync-pwm	= <1 9600 9400 1>;
++	};
++
++	dout: ssc-generic@0 {
++		compatible = "develed,ssc-generic";
++		status = "okay";
++	};
++
++	sound@0 {
++		compatible = "atmel,asoc-generic";
++
++		atmel,model = "Develed I/O controller";
++		atmel,audio-routing =
++			"Data out", "DOUT";
++
++		atmel,ssc-controller = <&ssc0>;
++		atmel,audio-codec = <&dout>;
++	};
++};
++
++&pwm0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_pwm0>;
++	status = "okay";
++};
++
++&ssc0 {
++	status = "okay";
++};
+diff --git a/arch/arm/boot/dts/sama5d4.dtsi b/arch/arm/boot/dts/sama5d4.dtsi
+index e674e00..f364649 100644
+--- a/arch/arm/boot/dts/sama5d4.dtsi
++++ b/arch/arm/boot/dts/sama5d4.dtsi
+@@ -70,6 +70,7 @@
+ 		gpio4 = &pioE;
+ 		tcb0 = &tcb0;
+ 		tcb1 = &tcb1;
++		tcb2 = &tcb2;
+ 		i2c0 = &i2c0;
+ 		i2c1 = &i2c1;
+ 		i2c2 = &i2c2;
+@@ -1246,6 +1247,14 @@
+ 				clock-names = "t0_clk";
+ 			};
+ 
++			tcb2: timer@fc024000 {
++				compatible = "atmel,at91sam9x5-tcb";
++				reg = <0xfc024000 0x100>;
++				interrupts = <42 IRQ_TYPE_LEVEL_HIGH 0>;
++				clocks = <&tcb2_clk>;
++				clock-names = "t0_clk";
++			};
++
+ 			adc0: adc@fc034000 {
+ 				compatible = "atmel,at91sam9x5-adc";
+ 				reg = <0xfc034000 0x100>;
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 5add358..e8d61e6 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -180,4 +180,6 @@ source "drivers/ras/Kconfig"
+ 
+ source "drivers/thunderbolt/Kconfig"
+ 
++source "drivers/develed/Kconfig"
++
+ endmenu
+diff --git a/drivers/Makefile b/drivers/Makefile
+index ebee555..d6dcdc4 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -161,3 +161,6 @@ obj-$(CONFIG_POWERCAP)		+= powercap/
+ obj-$(CONFIG_MCB)		+= mcb/
+ obj-$(CONFIG_RAS)		+= ras/
+ obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
++
++# Custom drivers
++obj-$(CONFIG_DEVELED)		+= develed/
+diff --git a/drivers/develed/Kconfig b/drivers/develed/Kconfig
+new file mode 100644
+index 0000000..d3eb0a26
+--- /dev/null
++++ b/drivers/develed/Kconfig
+@@ -0,0 +1,21 @@
++#
++# Develed drivers
++#
++
++menuconfig DEVELED
++	bool "Develed drivers"
++	depends on GPIOLIB
++	help
++	  This enables Develed custom drivers.
++	  You only need to enable this, if you also want to enable
++	  one or more of the drivers below.
++
++if DEVELED
++
++config DEVELED_PWM_SSC
++	bool "Develed PWM signal generation for SSC"
++        depends on PWM
++	help
++	  Say Y here to enable the Develed SSC signal generation via PWM.
++
++endif
+diff --git a/drivers/develed/Makefile b/drivers/develed/Makefile
+new file mode 100644
+index 0000000..36dc0be
+--- /dev/null
++++ b/drivers/develed/Makefile
+@@ -0,0 +1,3 @@
++# Drivers for Develed
++
++obj-$(CONFIG_DEVELED_PWM_SSC)		+= pwm-ssc.o
+diff --git a/drivers/develed/pwm-ssc.c b/drivers/develed/pwm-ssc.c
+new file mode 100644
+index 0000000..413a078
+--- /dev/null
++++ b/drivers/develed/pwm-ssc.c
+@@ -0,0 +1,213 @@
++/*
++ * linux/drivers/develed/pwm-ssc.c
++ *
++ * PWM-generated signals for SSC peripheral
++ *
++ * Copyright @ 2017 Develer Srl
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/platform_device.h>
++#include <linux/of_platform.h>
++#include <linux/err.h>
++#include <linux/pwm.h>
++#include <linux/sysfs.h>
++
++#define NSEC_IN_SEC	1000000000
++
++enum pwm_ssc_signals {
++	PWM_SSC_CLOCK	= 0,
++	PWM_SSC_SYNC,
++	PWM_SSC_SIGNALS_NUM /* guard */
++};
++
++static const char *pwm_ssc_signal_names[PWM_SSC_SIGNALS_NUM] = {
++	"develed,clk-pwm",
++	"develed,sync-pwm",
++};
++
++struct pwm_ssc_params {
++	struct pwm_device	*pwm;
++	unsigned int		channel;
++	unsigned int		period;
++	unsigned int		duty;
++	unsigned int		polarity;
++};
++
++struct pwm_ssc_data {
++	struct pwm_ssc_params	params[PWM_SSC_SIGNALS_NUM];
++};
++
++static int pwm_ssc_enable(struct device *dev, struct pwm_ssc_data *priv);
++
++static ssize_t pwm_ssc_enable_store(struct device *dev,
++				    struct device_attribute *attr,
++				    const char *buf, size_t size)
++{
++	struct pwm_ssc_data *priv = dev_get_drvdata(dev);
++	unsigned int ok;
++
++	if (kstrtouint(buf, 10, &ok) < 0)
++		return -EINVAL;
++
++	if (ok && pwm_ssc_enable(dev, priv))
++		return -EIO;
++
++	return size;
++}
++
++static DEVICE_ATTR(enable, S_IWUSR, NULL, pwm_ssc_enable_store);
++
++static struct attribute *pwm_ssc_attributes[] = {
++	&dev_attr_enable.attr,
++	NULL
++};
++
++static const struct attribute_group pwm_ssc_attr_group = {
++	.attrs	= pwm_ssc_attributes,
++};
++
++static int pwm_ssc_add(struct device *dev, const char *pwm_label,
++		       struct pwm_ssc_params *params)
++{
++	int ret;
++	u32 props[4];
++
++	ret = of_property_read_u32_array(dev->of_node, pwm_label, props, ARRAY_SIZE(props));
++	if (ret) {
++		dev_err(dev, "could not read property %s: %d\n", pwm_label, ret);
++		return ret;
++	}
++
++	params->channel = props[0];
++	params->period = props[1];
++	params->duty = props[2];
++	params->polarity = props[3];
++
++	params->pwm = pwm_request(params->channel, pwm_label);
++	if (IS_ERR(params->pwm)) {
++		dev_err(dev, "could not request PWM%d: %d\n", params->channel, ret);
++		return PTR_ERR(params->pwm);
++	}
++
++	ret = pwm_config(params->pwm, params->duty, params->period);
++	if (ret) {
++		dev_err(dev, "could not config PWM%d: %d\n", params->channel, ret);
++		goto exit_free;
++	}
++
++	ret = pwm_set_polarity(params->pwm, params->polarity);
++	if (ret) {
++		dev_err(dev, "could not set PWM%d polarity\n", params->channel);
++		goto exit_free;
++	}
++
++	dev_info(dev, "%s: chan=%d, period=%d, duty=%d\n", pwm_label,
++			params->channel, params->period, params->duty);
++
++	return 0;
++
++exit_free:
++	pwm_free(params->pwm);
++	return ret;
++}
++
++static int pwm_ssc_create(struct device *dev, struct pwm_ssc_data *priv)
++{
++	int i;
++	int ret;
++
++	for (i = 0; i < PWM_SSC_SIGNALS_NUM; i++) {
++		ret = pwm_ssc_add(dev, pwm_ssc_signal_names[i], &priv->params[i]);
++		if (ret)
++			goto release_all;
++	}
++
++	return 0;
++
++release_all:
++	for (i -= 1; i >= 0; i--)
++		pwm_free(priv->params[i].pwm);
++
++	return ret;
++}
++
++static int pwm_ssc_enable(struct device *dev, struct pwm_ssc_data *priv)
++{
++	int ret;
++
++	ret = pwm_sync(priv->params[PWM_SSC_CLOCK].pwm);
++	if (ret)
++		dev_err(dev, "could not sync PWM channels\n");
++
++	return ret;
++}
++
++static void pwm_ssc_cleanup(struct pwm_ssc_data *priv)
++{
++	int i;
++
++	for (i = 0; i < PWM_SSC_SIGNALS_NUM; i++)
++		pwm_free(priv->params[i].pwm);
++}
++
++static int pwm_ssc_probe(struct platform_device *pdev)
++{
++	struct pwm_ssc_data *priv;
++	int ret = 0;
++
++	priv = devm_kzalloc(&pdev->dev, sizeof(struct pwm_ssc_data), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	ret = sysfs_create_group(&pdev->dev.kobj, &pwm_ssc_attr_group);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to create sysfs\n");
++		return ret;
++	}
++
++	ret = pwm_ssc_create(&pdev->dev, priv);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, priv);
++
++	return 0;
++}
++
++static int pwm_ssc_remove(struct platform_device *pdev)
++{
++	struct pwm_ssc_data *priv = platform_get_drvdata(pdev);
++
++	pwm_ssc_cleanup(priv);
++
++	return 0;
++}
++
++static const struct of_device_id of_pwm_ssc_match[] = {
++	{ .compatible = "develed,pwm-ssc" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, of_pwm_ssc_match);
++
++static struct platform_driver pwm_ssc_driver = {
++	.probe		= pwm_ssc_probe,
++	.remove		= pwm_ssc_remove,
++	.driver		= {
++		.name	= "pwm-ssc",
++		.owner	= THIS_MODULE,
++		.of_match_table = of_pwm_ssc_match,
++	},
++};
++
++module_platform_driver(pwm_ssc_driver);
++
++MODULE_AUTHOR("Pietro Lorefice <pietro@develer.com>");
++MODULE_DESCRIPTION("PWM-generated signals for SSC peripheral");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:pwm-ssc");
+diff --git a/drivers/dma/at_xdmac.c b/drivers/dma/at_xdmac.c
+index b7cd5a8..dfb0883 100644
+--- a/drivers/dma/at_xdmac.c
++++ b/drivers/dma/at_xdmac.c
+@@ -415,8 +415,9 @@ static dma_cookie_t at_xdmac_tx_submit(struct dma_async_tx_descriptor *tx)
+ 	struct at_xdmac_desc	*desc = txd_to_at_desc(tx);
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(tx->chan);
+ 	dma_cookie_t		cookie;
++	unsigned long		irqflags;
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, irqflags);
+ 	cookie = dma_cookie_assign(tx);
+ 
+ 	dev_vdbg(chan2dev(tx->chan), "%s: atchan 0x%p, add desc 0x%p to xfers_list\n",
+@@ -425,7 +426,7 @@ static dma_cookie_t at_xdmac_tx_submit(struct dma_async_tx_descriptor *tx)
+ 	if (list_is_singular(&atchan->xfers_list))
+ 		at_xdmac_start_xfer(atchan, desc);
+ 
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, irqflags);
+ 	return cookie;
+ }
+ 
+@@ -563,6 +564,8 @@ at_xdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 	struct scatterlist	*sg;
+ 	int			i;
+ 	unsigned int		xfer_size = 0;
++	unsigned long		irqflags;
++	struct dma_async_tx_descriptor	*ret = NULL;
+ 
+ 	if (!sgl)
+ 		return NULL;
+@@ -578,7 +581,7 @@ at_xdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 		 flags);
+ 
+ 	/* Protect dma_sconfig field that can be modified by set_slave_conf. */
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, irqflags);
+ 
+ 	/* Prepare descriptors. */
+ 	for_each_sg(sgl, sg, sg_len, i) {
+@@ -589,8 +592,7 @@ at_xdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 		mem = sg_dma_address(sg);
+ 		if (unlikely(!len)) {
+ 			dev_err(chan2dev(chan), "sg data length is zero\n");
+-			spin_unlock_bh(&atchan->lock);
+-			return NULL;
++			goto spin_unlock;
+ 		}
+ 		dev_dbg(chan2dev(chan), "%s: * sg%d len=%u, mem=0x%08x\n",
+ 			 __func__, i, len, mem);
+@@ -600,8 +602,7 @@ at_xdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 			dev_err(chan2dev(chan), "can't get descriptor\n");
+ 			if (first)
+ 				list_splice_init(&first->descs_list, &atchan->free_descs_list);
+-			spin_unlock_bh(&atchan->lock);
+-			return NULL;
++			goto spin_unlock;
+ 		}
+ 
+ 		/* Linked list descriptor setup. */
+@@ -645,13 +646,15 @@ at_xdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 		xfer_size += len;
+ 	}
+ 
+-	spin_unlock_bh(&atchan->lock);
+ 
+ 	first->tx_dma_desc.flags = flags;
+ 	first->xfer_size = xfer_size;
+ 	first->direction = direction;
++	ret = &first->tx_dma_desc;
+ 
+-	return &first->tx_dma_desc;
++spin_unlock:
++	spin_unlock_irqrestore(&atchan->lock, irqflags);
++	return ret;
+ }
+ 
+ static struct dma_async_tx_descriptor *
+@@ -664,7 +667,7 @@ at_xdmac_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr,
+ 	struct at_xdmac_desc	*first = NULL, *prev = NULL;
+ 	unsigned int		periods = buf_len / period_len;
+ 	int			i;
+-	u32			cfg;
++	unsigned long		irqflags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s: buf_addr=%pad, buf_len=%zd, period_len=%zd, dir=%s, flags=0x%lx\n",
+ 		__func__, &buf_addr, buf_len, period_len,
+@@ -683,16 +686,16 @@ at_xdmac_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr,
+ 	for (i = 0; i < periods; i++) {
+ 		struct at_xdmac_desc	*desc = NULL;
+ 
+-		spin_lock_bh(&atchan->lock);
++		spin_lock_irqsave(&atchan->lock, irqflags);
+ 		desc = at_xdmac_get_desc(atchan);
+ 		if (!desc) {
+ 			dev_err(chan2dev(chan), "can't get descriptor\n");
+ 			if (first)
+ 				list_splice_init(&first->descs_list, &atchan->free_descs_list);
+-			spin_unlock_bh(&atchan->lock);
++			spin_unlock_irqrestore(&atchan->lock, irqflags);
+ 			return NULL;
+ 		}
+-		spin_unlock_bh(&atchan->lock);
++		spin_unlock_irqrestore(&atchan->lock, irqflags);
+ 		dev_dbg(chan2dev(chan),
+ 			"%s: desc=0x%p, tx_dma_desc.phys=%pad\n",
+ 			__func__, desc, &desc->tx_dma_desc.phys);
+@@ -767,6 +770,7 @@ at_xdmac_prep_dma_memcpy(struct dma_chan *chan, dma_addr_t dest, dma_addr_t src,
+ 					| AT_XDMAC_CC_SIF(0)
+ 					| AT_XDMAC_CC_MBSIZE_SIXTEEN
+ 					| AT_XDMAC_CC_TYPE_MEM_TRAN;
++	unsigned long		irqflags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s: src=%pad, dest=%pad, len=%zd, flags=0x%lx\n",
+ 		__func__, &src, &dest, len, flags);
+@@ -799,9 +803,9 @@ at_xdmac_prep_dma_memcpy(struct dma_chan *chan, dma_addr_t dest, dma_addr_t src,
+ 
+ 		dev_dbg(chan2dev(chan), "%s: remaining_size=%zu\n", __func__, remaining_size);
+ 
+-		spin_lock_bh(&atchan->lock);
++		spin_lock_irqsave(&atchan->lock, irqflags);
+ 		desc = at_xdmac_get_desc(atchan);
+-		spin_unlock_bh(&atchan->lock);
++		spin_unlock_irqrestore(&atchan->lock, irqflags);
+ 		if (!desc) {
+ 			dev_err(chan2dev(chan), "can't get descriptor\n");
+ 			if (first)
+@@ -887,6 +891,7 @@ at_xdmac_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
+ 	int			residue;
+ 	u32			cur_nda, mask, value;
+ 	u8			dwidth = 0;
++	unsigned long		flags;
+ 
+ 	ret = dma_cookie_status(chan, cookie, txstate);
+ 	if (ret == DMA_COMPLETE)
+@@ -895,7 +900,7 @@ at_xdmac_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
+ 	if (!txstate)
+ 		return ret;
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 
+ 	desc = list_first_entry(&atchan->xfers_list, struct at_xdmac_desc, xfer_node);
+ 
+@@ -905,8 +910,7 @@ at_xdmac_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
+ 	 */
+ 	if (!desc->active_xfer) {
+ 		dma_set_residue(txstate, desc->xfer_size);
+-		spin_unlock_bh(&atchan->lock);
+-		return ret;
++		goto spin_unlock;
+ 	}
+ 
+ 	residue = desc->xfer_size;
+@@ -937,14 +941,14 @@ at_xdmac_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
+ 	}
+ 	residue += at_xdmac_chan_read(atchan, AT_XDMAC_CUBC) << dwidth;
+ 
+-	spin_unlock_bh(&atchan->lock);
+-
+ 	dma_set_residue(txstate, residue);
+ 
+ 	dev_dbg(chan2dev(chan),
+ 		 "%s: desc=0x%p, tx_dma_desc.phys=%pad, tx_status=%d, cookie=%d, residue=%d\n",
+ 		 __func__, desc, &desc->tx_dma_desc.phys, ret, cookie, residue);
+ 
++spin_unlock:
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 	return ret;
+ }
+ 
+@@ -965,8 +969,9 @@ static void at_xdmac_remove_xfer(struct at_xdmac_chan *atchan,
+ static void at_xdmac_advance_work(struct at_xdmac_chan *atchan)
+ {
+ 	struct at_xdmac_desc	*desc;
++	unsigned long		flags;
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 
+ 	/*
+ 	 * If channel is enabled, do nothing, advance_work will be triggered
+@@ -981,7 +986,7 @@ static void at_xdmac_advance_work(struct at_xdmac_chan *atchan)
+ 			at_xdmac_start_xfer(atchan, desc);
+ 	}
+ 
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ }
+ 
+ static void at_xdmac_handle_cyclic(struct at_xdmac_chan *atchan)
+@@ -1117,12 +1122,13 @@ static int at_xdmac_device_config(struct dma_chan *chan,
+ {
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(chan);
+ 	int ret;
++	unsigned long		flags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s\n", __func__);
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 	ret = at_xdmac_set_slave_config(chan, config);
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 
+ 	return ret;
+ }
+@@ -1131,18 +1137,19 @@ static int at_xdmac_device_pause(struct dma_chan *chan)
+ {
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(chan);
+ 	struct at_xdmac		*atxdmac = to_at_xdmac(atchan->chan.device);
++	unsigned long		flags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s\n", __func__);
+ 
+ 	if (test_and_set_bit(AT_XDMAC_CHAN_IS_PAUSED, &atchan->status))
+ 		return 0;
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 	at_xdmac_write(atxdmac, AT_XDMAC_GRWS, atchan->mask);
+ 	while (at_xdmac_chan_read(atchan, AT_XDMAC_CC)
+ 	       & (AT_XDMAC_CC_WRIP | AT_XDMAC_CC_RDIP))
+ 		cpu_relax();
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -1151,16 +1158,19 @@ static int at_xdmac_device_resume(struct dma_chan *chan)
+ {
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(chan);
+ 	struct at_xdmac		*atxdmac = to_at_xdmac(atchan->chan.device);
++	unsigned long		flags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s\n", __func__);
+ 
+-	spin_lock_bh(&atchan->lock);
+-	if (!at_xdmac_chan_is_paused(atchan))
++	spin_lock_irqsave(&atchan->lock, flags);
++	if (!at_xdmac_chan_is_paused(atchan)) {
++		spin_unlock_irqrestore(&atchan->lock, flags);
+ 		return 0;
++	}
+ 
+ 	at_xdmac_write(atxdmac, AT_XDMAC_GRWR, atchan->mask);
+ 	clear_bit(AT_XDMAC_CHAN_IS_PAUSED, &atchan->status);
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -1170,10 +1180,11 @@ static int at_xdmac_device_terminate_all(struct dma_chan *chan)
+ 	struct at_xdmac_desc	*desc, *_desc;
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(chan);
+ 	struct at_xdmac		*atxdmac = to_at_xdmac(atchan->chan.device);
++	unsigned long		flags;
+ 
+ 	dev_dbg(chan2dev(chan), "%s\n", __func__);
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 	at_xdmac_write(atxdmac, AT_XDMAC_GD, atchan->mask);
+ 	while (at_xdmac_read(atxdmac, AT_XDMAC_GS) & atchan->mask)
+ 		cpu_relax();
+@@ -1183,7 +1194,7 @@ static int at_xdmac_device_terminate_all(struct dma_chan *chan)
+ 		at_xdmac_remove_xfer(atchan, desc);
+ 
+ 	clear_bit(AT_XDMAC_CHAN_IS_CYCLIC, &atchan->status);
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -1193,8 +1204,9 @@ static int at_xdmac_alloc_chan_resources(struct dma_chan *chan)
+ 	struct at_xdmac_chan	*atchan = to_at_xdmac_chan(chan);
+ 	struct at_xdmac_desc	*desc;
+ 	int			i;
++	unsigned long		flags;
+ 
+-	spin_lock_bh(&atchan->lock);
++	spin_lock_irqsave(&atchan->lock, flags);
+ 
+ 	if (at_xdmac_chan_is_enabled(atchan)) {
+ 		dev_err(chan2dev(chan),
+@@ -1225,7 +1237,7 @@ static int at_xdmac_alloc_chan_resources(struct dma_chan *chan)
+ 	dev_dbg(chan2dev(chan), "%s: allocated %d descriptors\n", __func__, i);
+ 
+ spin_unlock:
+-	spin_unlock_bh(&atchan->lock);
++	spin_unlock_irqrestore(&atchan->lock, flags);
+ 	return i;
+ }
+ 
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 006242c..b00c5d1 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -73,11 +73,10 @@ config ATMEL_TCB_CLKSRC
+ 	  (delays of up to two seconds) based on the 32 KiHz clock.
+ 
+ config ATMEL_TCB_CLKSRC_BLOCK
+-	int
++	int "TC Block"
+ 	depends on ATMEL_TCB_CLKSRC
+-	prompt "TC Block" if CPU_AT32AP700X
+ 	default 0
+-	range 0 1
++	range 0 2
+ 	help
+ 	  Some chips provide more than one TC block, so you have the
+ 	  choice of which one to use for the clock framework.  The other
+diff --git a/drivers/pwm/core.c b/drivers/pwm/core.c
+index 966497d..46c36df 100644
+--- a/drivers/pwm/core.c
++++ b/drivers/pwm/core.c
+@@ -475,6 +475,40 @@ void pwm_disable(struct pwm_device *pwm)
+ }
+ EXPORT_SYMBOL_GPL(pwm_disable);
+ 
++/**
++ * pwm_set_capture() - capture and report a PWM signal
++ * @pwm: PWM device
++ * @callback: function to call when the capture event is received
++ */
++void pwm_set_capture(struct pwm_device *pwm,
++		     pwm_capture_cb_t callback,
++		     void *args)
++{
++	mutex_lock(&pwm_lock);
++
++	if (pwm && pwm->chip->ops && pwm->chip->ops->set_capture)
++		pwm->chip->ops->set_capture(pwm->chip, pwm, callback, args);
++
++	mutex_unlock(&pwm_lock);
++}
++EXPORT_SYMBOL_GPL(pwm_set_capture);
++
++/**
++ * pwm_sync() - sync PWM channels
++ * @pwm: PWM device
++ */
++int pwm_sync(struct pwm_device *pwm)
++{
++	if (!pwm || !pwm->chip->ops)
++		return -EINVAL;
++
++	if (!pwm->chip->ops->sync)
++		return -ENOSYS;
++
++	return pwm->chip->ops->sync(pwm->chip, pwm);
++}
++EXPORT_SYMBOL_GPL(pwm_sync);
++
+ static struct pwm_chip *of_node_to_pwmchip(struct device_node *np)
+ {
+ 	struct pwm_chip *chip;
+diff --git a/drivers/pwm/pwm-atmel.c b/drivers/pwm/pwm-atmel.c
+index d3c22de..eaa9b2a 100644
+--- a/drivers/pwm/pwm-atmel.c
++++ b/drivers/pwm/pwm-atmel.c
+@@ -16,6 +16,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/pwm.h>
+ #include <linux/slab.h>
++#include <linux/interrupt.h>
+ 
+ /* The following is global registers for PWM controller */
+ #define PWM_ENA			0x04
+@@ -23,6 +24,8 @@
+ #define PWM_SR			0x0C
+ /* Bit field in SR */
+ #define PWM_SR_ALL_CH_ON	0x0F
++#define PWM_IER1		0x10
++#define PWM_ISR1		0x1C
+ 
+ /* The following register is PWM channel related registers */
+ #define PWM_CH_REG_OFFSET	0x200
+@@ -59,6 +62,8 @@ struct atmel_pwm_chip {
+ 	struct pwm_chip chip;
+ 	struct clk *clk;
+ 	void __iomem *base;
++	pwm_capture_cb_t callback;
++	void *cb_args;
+ 
+ 	void (*config)(struct pwm_chip *chip, struct pwm_device *pwm,
+ 		       unsigned long dty, unsigned long prd);
+@@ -248,14 +253,58 @@ static void atmel_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
+ 	clk_disable(atmel_pwm->clk);
+ }
+ 
++static void atmel_pwm_set_capture(struct pwm_chip *chip, struct pwm_device *pwm,
++				  pwm_capture_cb_t callback, void *args)
++{
++	struct atmel_pwm_chip *atmel_pwm = to_atmel_pwm_chip(chip);
++	u32 val;
++
++	atmel_pwm->callback = callback;
++	atmel_pwm->cb_args = args;
++
++	val = atmel_pwm_readl(atmel_pwm, PWM_IER1);
++	val |= (1 << pwm->hwpwm);
++	atmel_pwm_writel(atmel_pwm, PWM_IER1, val);
++}
++
++static int atmel_pwm_sync(struct pwm_chip *chip, struct pwm_device *pwm)
++{
++	struct atmel_pwm_chip *atmel_pwm = to_atmel_pwm_chip(chip);
++	int ret;
++
++	ret = clk_enable(atmel_pwm->clk);
++	if (ret) {
++		dev_err(chip->dev, "failed to enable PWM clock\n");
++		return ret;
++	}
++
++	atmel_pwm_writel(atmel_pwm, PWM_ENA, 0xf);
++
++	return 0;
++}
++
+ static const struct pwm_ops atmel_pwm_ops = {
+ 	.config = atmel_pwm_config,
+ 	.set_polarity = atmel_pwm_set_polarity,
++	.set_capture = atmel_pwm_set_capture,
+ 	.enable = atmel_pwm_enable,
+ 	.disable = atmel_pwm_disable,
++	.sync = atmel_pwm_sync,
+ 	.owner = THIS_MODULE,
+ };
+ 
++static irqreturn_t atmel_pwm_interrupt(int irq, void *data)
++{
++	struct atmel_pwm_chip *atmel_pwm = data;
++
++	atmel_pwm_readl(atmel_pwm, PWM_ISR1);
++
++	if (atmel_pwm->callback)
++		atmel_pwm->callback(atmel_pwm->cb_args);
++
++	return IRQ_HANDLED;
++}
++
+ struct atmel_pwm_data {
+ 	void (*config)(struct pwm_chip *chip, struct pwm_device *pwm,
+ 		       unsigned long dty, unsigned long prd);
+@@ -320,7 +369,7 @@ static int atmel_pwm_probe(struct platform_device *pdev)
+ 	const struct atmel_pwm_data *data;
+ 	struct atmel_pwm_chip *atmel_pwm;
+ 	struct resource *res;
+-	int ret;
++	int irq, ret;
+ 
+ 	data = atmel_pwm_get_driver_data(pdev);
+ 	if (!data)
+@@ -339,6 +388,19 @@ static int atmel_pwm_probe(struct platform_device *pdev)
+ 	if (IS_ERR(atmel_pwm->clk))
+ 		return PTR_ERR(atmel_pwm->clk);
+ 
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0) {
++		dev_err(&pdev->dev, "failed to obtain IRQ\n");
++		return irq;
++	}
++
++	ret = devm_request_irq(&pdev->dev, irq, atmel_pwm_interrupt, 0,
++			       pdev->name, atmel_pwm);
++	if (ret < 0) {
++		dev_err(&pdev->dev, "failed to request IRQ\n");
++		return ret;
++	}
++
+ 	ret = clk_prepare(atmel_pwm->clk);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "failed to prepare PWM clock\n");
+diff --git a/include/linux/atmel_tc.h b/include/linux/atmel_tc.h
+index b87c1c7..adbf9df 100644
+--- a/include/linux/atmel_tc.h
++++ b/include/linux/atmel_tc.h
+@@ -107,6 +107,31 @@ extern const u8 atmel_tc_divisors[5];
+ #define        ATMEL_TC_TC2XC2S_NONE	(1 << 4)
+ #define        ATMEL_TC_TC2XC2S_TIOA0	(2 << 4)
+ #define        ATMEL_TC_TC2XC2S_TIOA1	(3 << 4)
++#define     ATMEL_TC_QDEN	(1 << 8)
++#define     ATMEL_TC_POSEN	(1 << 9)
++#define     ATMEL_TC_SPEEDEN	(1 << 10)
++#define     ATMEL_TC_QDTRANS	(1 << 11)
++#define     ATMEL_TC_EDGPHA	(1 << 12)
++#define     ATMEL_TC_INVA	(1 << 13)
++#define     ATMEL_TC_INVB	(1 << 14)
++#define     ATMEL_TC_INVIDX	(1 << 15)
++#define     ATMEL_TC_SWAP	(1 << 16)
++#define     ATMEL_TC_IDXPHB	(1 << 17)
++#define     ATMEL_TC_MAXFILT	(63 << 20)
++
++/*
++ * Quadrature encoder registers
++ */
++
++#define ATMEL_TC_QIER	0xc8
++#define ATMEL_TC_QIDR	0xcc
++#define ATMEL_TC_QIMR	0xd0
++#define ATMEL_TC_QISR	0xd4
++#define     ATMEL_TC_IDX	(1 << 0)
++#define     ATMEL_TC_DIRCHG	(1 << 1)
++#define     ATMEL_TC_QERR	(1 << 2)
++#define     ATMEL_TC_DIR	(1 << 8)
++#define     ATMEL_ALL_QIRQS	(ATMEL_TC_IDX | ATMEL_TC_DIRCHG | ATMEL_TC_QERR)
+ 
+ 
+ /*
+@@ -266,4 +291,7 @@ extern const u8 atmel_tc_divisors[5];
+ 				 ATMEL_TC_LDRBS | ATMEL_TC_ETRGS) \
+ 				 /* all IRQs */
+ 
++#define ATMEL_TC_EMR	(0x30)			/* extended mode register */
++#define    ATMEL_TC_NODIVCLK	(1 << 8)	/* no divided clock */
++
+ #endif
+diff --git a/include/linux/pwm.h b/include/linux/pwm.h
+index e90628c..3d407db 100644
+--- a/include/linux/pwm.h
++++ b/include/linux/pwm.h
+@@ -7,6 +7,8 @@
+ struct pwm_device;
+ struct seq_file;
+ 
++typedef void (*pwm_capture_cb_t)(void *args);
++
+ #if IS_ENABLED(CONFIG_PWM)
+ /*
+  * pwm_request - request a PWM device
+@@ -32,6 +34,16 @@ int pwm_enable(struct pwm_device *pwm);
+  * pwm_disable - stop a PWM output toggling
+  */
+ void pwm_disable(struct pwm_device *pwm);
++
++/*
++ * pwm_capture - capture and report a PWM signal
++ */
++void pwm_set_capture(struct pwm_device *pwm, pwm_capture_cb_t callback, void *args);
++
++/*
++ * pwm_sync - sync PWM channels
++ */
++int pwm_sync(struct pwm_device *pwm);
+ #else
+ static inline struct pwm_device *pwm_request(int pwm_id, const char *label)
+ {
+@@ -55,6 +67,16 @@ static inline int pwm_enable(struct pwm_device *pwm)
+ static inline void pwm_disable(struct pwm_device *pwm)
+ {
+ }
++
++static inline void pwm_set_capture(struct pwm_device *pwm,
++				   pwm_capture_cb_t callback, void *args)
++{
++}
++
++static inline int pwm_sync(struct pwm_device *pwm)
++{
++	return -EINVAL;
++}
+ #endif
+ 
+ struct pwm_chip;
+@@ -125,6 +147,7 @@ int pwm_set_polarity(struct pwm_device *pwm, enum pwm_polarity polarity);
+  * @free: optional hook for freeing a PWM
+  * @config: configure duty cycles and period length for this PWM
+  * @set_polarity: configure the polarity of this PWM
++ * @capture: capture and report PWM signal
+  * @enable: enable PWM output toggling
+  * @disable: disable PWM output toggling
+  * @dbg_show: optional routine to show contents in debugfs
+@@ -141,10 +164,16 @@ struct pwm_ops {
+ 	int			(*set_polarity)(struct pwm_chip *chip,
+ 					  struct pwm_device *pwm,
+ 					  enum pwm_polarity polarity);
++	void			(*set_capture)(struct pwm_chip *chip,
++					   struct pwm_device *pwm,
++					   pwm_capture_cb_t callback,
++					   void *args);
+ 	int			(*enable)(struct pwm_chip *chip,
+ 					  struct pwm_device *pwm);
+ 	void			(*disable)(struct pwm_chip *chip,
+ 					   struct pwm_device *pwm);
++	int			(*sync)(struct pwm_chip *chip,
++					struct pwm_device *pwm);
+ #ifdef CONFIG_DEBUG_FS
+ 	void			(*dbg_show)(struct pwm_chip *chip,
+ 					    struct seq_file *s);
+diff --git a/sound/soc/atmel/Kconfig b/sound/soc/atmel/Kconfig
+index 27e3fc4..22c0a34 100644
+--- a/sound/soc/atmel/Kconfig
++++ b/sound/soc/atmel/Kconfig
+@@ -61,3 +61,12 @@ config SND_AT91_SOC_AFEB9260
+ 	select SND_SOC_TLV320AIC23_I2C
+ 	help
+ 	  Say Y here to support sound on AFEB9260 board.
++
++config SND_ATMEL_SOC_GENERIC
++	tristate "Atmel ASoC driver for generic output stages"
++	depends on ARCH_AT91 && ATMEL_SSC && SND_ATMEL_SOC
++	select SND_ATMEL_SOC_SSC
++	select SND_ATMEL_SOC_DMA
++	select SND_SOC_GENERIC
++	help
++	  Say Y if you want to add support for Atmel ASoC generic SSC devices.
+diff --git a/sound/soc/atmel/Makefile b/sound/soc/atmel/Makefile
+index 5baabc8..398a5c0 100644
+--- a/sound/soc/atmel/Makefile
++++ b/sound/soc/atmel/Makefile
+@@ -13,8 +13,12 @@ obj-$(CONFIG_SND_ATMEL_SOC_SSC) += snd-soc-atmel_ssc_dai.o
+ snd-soc-sam9g20-wm8731-objs := sam9g20_wm8731.o
+ snd-atmel-soc-wm8904-objs := atmel_wm8904.o
+ snd-soc-sam9x5-wm8731-objs := sam9x5_wm8731.o
++snd-atmel-soc-generic-objs := atmel_ssc_generic.o
+ 
+ obj-$(CONFIG_SND_AT91_SOC_SAM9G20_WM8731) += snd-soc-sam9g20-wm8731.o
+ obj-$(CONFIG_SND_ATMEL_SOC_WM8904) += snd-atmel-soc-wm8904.o
+ obj-$(CONFIG_SND_AT91_SOC_SAM9X5_WM8731) += snd-soc-sam9x5-wm8731.o
+ obj-$(CONFIG_SND_AT91_SOC_AFEB9260) += snd-soc-afeb9260.o
++
++# Develed
++obj-$(CONFIG_SND_ATMEL_SOC_GENERIC) += snd-atmel-soc-generic.o
+diff --git a/sound/soc/atmel/atmel_ssc_dai.c b/sound/soc/atmel/atmel_ssc_dai.c
+index 26fcb37..12a9468 100644
+--- a/sound/soc/atmel/atmel_ssc_dai.c
++++ b/sound/soc/atmel/atmel_ssc_dai.c
+@@ -191,13 +191,39 @@ static irqreturn_t atmel_ssc_interrupt(int irq, void *dev_id)
+ /*-------------------------------------------------------------------------*\
+  * DAI functions
+ \*-------------------------------------------------------------------------*/
++static struct atmel_ssc_info *atmel_ssc_get_info(struct snd_soc_dai *dai)
++{
++	struct ssc_device *ssc = dev_get_drvdata(dai->dev);
++	int i;
++
++	for (i = 0; i < NUM_SSC_DEVICES; i++)
++		if (ssc_info[i].ssc == ssc)
++			return &ssc_info[i];
++
++	return NULL;
++}
++
++static struct atmel_pcm_dma_params *atmel_ssc_get_dma_params(
++		struct snd_soc_dai *dai,
++		int dir)
++{
++	struct ssc_device *ssc = dev_get_drvdata(dai->dev);
++	int i;
++
++	for (i = 0; i < NUM_SSC_DEVICES; i++)
++		if (ssc_info[i].ssc == ssc)
++			return &ssc_dma_params[i][dir];
++
++	return NULL;
++}
++
+ /*
+  * Startup.  Only that one substream allowed in each direction.
+  */
+ static int atmel_ssc_startup(struct snd_pcm_substream *substream,
+ 			     struct snd_soc_dai *dai)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(dai);
+ 	struct atmel_pcm_dma_params *dma_params;
+ 	int dir, dir_mask;
+ 
+@@ -219,7 +245,7 @@ static int atmel_ssc_startup(struct snd_pcm_substream *substream,
+ 		dir_mask = SSC_DIR_MASK_CAPTURE;
+ 	}
+ 
+-	dma_params = &ssc_dma_params[dai->id][dir];
++	dma_params = atmel_ssc_get_dma_params(dai, dir);
+ 	dma_params->ssc = ssc_p->ssc;
+ 	dma_params->substream = substream;
+ 
+@@ -245,7 +271,7 @@ static int atmel_ssc_startup(struct snd_pcm_substream *substream,
+ static void atmel_ssc_shutdown(struct snd_pcm_substream *substream,
+ 			       struct snd_soc_dai *dai)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(dai);
+ 	struct atmel_pcm_dma_params *dma_params;
+ 	int dir, dir_mask;
+ 
+@@ -291,7 +317,7 @@ static void atmel_ssc_shutdown(struct snd_pcm_substream *substream,
+ static int atmel_ssc_set_dai_fmt(struct snd_soc_dai *cpu_dai,
+ 		unsigned int fmt)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[cpu_dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(cpu_dai);
+ 
+ 	ssc_p->daifmt = fmt;
+ 	return 0;
+@@ -303,7 +329,7 @@ static int atmel_ssc_set_dai_fmt(struct snd_soc_dai *cpu_dai,
+ static int atmel_ssc_set_dai_clkdiv(struct snd_soc_dai *cpu_dai,
+ 	int div_id, int div)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[cpu_dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(cpu_dai);
+ 
+ 	switch (div_id) {
+ 	case ATMEL_SSC_CMR_DIV:
+@@ -341,8 +367,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
+ 	struct snd_pcm_hw_params *params,
+ 	struct snd_soc_dai *dai)
+ {
+-	int id = dai->id;
+-	struct atmel_ssc_info *ssc_p = &ssc_info[id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(dai);
+ 	struct ssc_device *ssc = ssc_p->ssc;
+ 	struct atmel_pcm_dma_params *dma_params;
+ 	int dir, channels, bits;
+@@ -453,7 +478,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
+ 		rcmr =	  SSC_BF(RCMR_PERIOD, 0)
+ 			| SSC_BF(RCMR_STTDLY, START_DELAY)
+ 			| SSC_BF(RCMR_START, SSC_START_FALLING_RF)
+-			| SSC_BF(RCMR_CKI, SSC_CKI_RISING)
++			| SSC_BF(RCMR_CKI, SSC_CKI_FALLING)
+ 			| SSC_BF(RCMR_CKO, SSC_CKO_NONE)
+ 			| SSC_BF(RCMR_CKS, ssc->clk_from_rk_pin ?
+ 					   SSC_CKS_PIN : SSC_CKS_CLOCK);
+@@ -467,14 +492,14 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
+ 			| SSC_BF(RFMR_DATLEN, (bits - 1));
+ 
+ 		tcmr =	  SSC_BF(TCMR_PERIOD, 0)
+-			| SSC_BF(TCMR_STTDLY, START_DELAY)
++			| SSC_BF(TCMR_STTDLY, 0 /* START_DELAY */)
+ 			| SSC_BF(TCMR_START, SSC_START_FALLING_RF)
+ 			| SSC_BF(TCMR_CKI, SSC_CKI_FALLING)
+ 			| SSC_BF(TCMR_CKO, SSC_CKO_NONE)
+ 			| SSC_BF(TCMR_CKS, ssc->clk_from_rk_pin ?
+ 					   SSC_CKS_CLOCK : SSC_CKS_PIN);
+ 
+-		tfmr =	  SSC_BF(TFMR_FSEDGE, SSC_FSEDGE_POSITIVE)
++		tfmr =	  SSC_BF(TFMR_FSEDGE, SSC_FSEDGE_NEGATIVE)
+ 			| SSC_BF(TFMR_FSDEN, 0)
+ 			| SSC_BF(TFMR_FSOS, SSC_FSOS_NONE)
+ 			| SSC_BF(TFMR_FSLEN, 0)
+@@ -499,7 +524,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
+ 		rcmr =	  SSC_BF(RCMR_PERIOD, ssc_p->rcmr_period)
+ 			| SSC_BF(RCMR_STTDLY, START_DELAY)
+ 			| SSC_BF(RCMR_START, SSC_START_FALLING_RF)
+-			| SSC_BF(RCMR_CKI, SSC_CKI_RISING)
++			| SSC_BF(RCMR_CKI, SSC_CKI_FALLING)
+ 			| SSC_BF(RCMR_CKO, SSC_CKO_NONE)
+ 			| SSC_BF(RCMR_CKS, ssc->clk_from_rk_pin ?
+ 					   SSC_CKS_PIN : SSC_CKS_CLOCK);
+@@ -668,7 +693,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
+ static int atmel_ssc_prepare(struct snd_pcm_substream *substream,
+ 			     struct snd_soc_dai *dai)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(dai);
+ 	struct atmel_pcm_dma_params *dma_params;
+ 	int dir;
+ 
+@@ -691,7 +716,7 @@ static int atmel_ssc_prepare(struct snd_pcm_substream *substream,
+ static int atmel_ssc_trigger(struct snd_pcm_substream *substream,
+ 			     int cmd, struct snd_soc_dai *dai)
+ {
+-	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
++	struct atmel_ssc_info *ssc_p = atmel_ssc_get_info(dai);
+ 	struct atmel_pcm_dma_params *dma_params;
+ 	int dir;
+ 
+@@ -724,7 +749,7 @@ static int atmel_ssc_suspend(struct snd_soc_dai *cpu_dai)
+ 	if (!cpu_dai->active)
+ 		return 0;
+ 
+-	ssc_p = &ssc_info[cpu_dai->id];
++	ssc_p = atmel_ssc_get_info(cpu_dai);
+ 
+ 	/* Save the status register before disabling transmit and receive */
+ 	ssc_p->ssc_state.ssc_sr = ssc_readl(ssc_p->ssc->regs, SR);
+@@ -753,7 +778,7 @@ static int atmel_ssc_resume(struct snd_soc_dai *cpu_dai)
+ 	if (!cpu_dai->active)
+ 		return 0;
+ 
+-	ssc_p = &ssc_info[cpu_dai->id];
++	ssc_p = atmel_ssc_get_info(cpu_dai);
+ 
+ 	/* restore SSC register settings */
+ 	ssc_writel(ssc_p->ssc->regs, TFMR, ssc_p->ssc_state.ssc_tfmr);
+diff --git a/sound/soc/atmel/atmel_ssc_generic.c b/sound/soc/atmel/atmel_ssc_generic.c
+new file mode 100644
+index 0000000..66ec49f
+--- /dev/null
++++ b/sound/soc/atmel/atmel_ssc_generic.c
+@@ -0,0 +1,181 @@
++/*
++ * atmel_ssc_generic - Atmel ASoC driver for generic SSC output.
++ *
++ * Copyright (C) 2017 Develer S.r.l.
++ *
++ * Author: Pietro Lorefice <pietro@develer.com>
++ *
++ * GPLv2 or later
++ */
++
++#include <linux/clk.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++
++#include <sound/soc.h>
++#include <sound/pcm_params.h>
++
++#include "atmel_ssc_dai.h"
++
++static const struct snd_soc_dapm_widget atmel_asoc_generic_dapm_widgets[] = {
++	SND_SOC_DAPM_LINE("Data out", NULL),
++};
++
++static int atmel_asoc_generic_hw_params(struct snd_pcm_substream *substream,
++		struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai *codec_dai = rtd->codec_dai;
++	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++	unsigned int rate = params_rate(params);
++
++	snd_soc_dai_set_sysclk(codec_dai, 0, rate, 0);
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		snd_soc_dai_set_clkdiv(cpu_dai, ATMEL_SSC_TCMR_PERIOD, 23);
++	else
++		snd_soc_dai_set_clkdiv(cpu_dai, ATMEL_SSC_RCMR_PERIOD, 23);
++
++	return 0;
++}
++
++static struct snd_soc_ops atmel_asoc_generic_ops = {
++	.hw_params = atmel_asoc_generic_hw_params,
++};
++
++static struct snd_soc_dai_link atmel_asoc_generic_dailink = {
++	.name = "generic",
++	.stream_name = "Playback",
++	.codec_dai_name = "generic",
++	.dai_fmt = SND_SOC_DAIFMT_I2S
++		| SND_SOC_DAIFMT_CBM_CFM,
++	.ops = &atmel_asoc_generic_ops,
++};
++
++static struct snd_soc_card atmel_asoc_generic_card = {
++	.name = "atmel_asoc_generic",
++	.owner = THIS_MODULE,
++	.dai_link = &atmel_asoc_generic_dailink,
++	.num_links = 1,
++	.dapm_widgets = atmel_asoc_generic_dapm_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(atmel_asoc_generic_dapm_widgets),
++	.fully_routed = true,
++};
++
++static int atmel_asoc_generic_dt_init(struct platform_device *pdev)
++{
++	struct device_node *np = pdev->dev.of_node;
++	struct device_node *codec_np, *cpu_np;
++	struct snd_soc_card *card = &atmel_asoc_generic_card;
++	struct snd_soc_dai_link *dailink = &atmel_asoc_generic_dailink;
++	int ret;
++
++	if (!np) {
++		dev_err(&pdev->dev, "only device tree supported\n");
++		return -EINVAL;
++	}
++
++	ret = snd_soc_of_parse_card_name(card, "atmel,model");
++	if (ret) {
++		dev_err(&pdev->dev, "failed to parse card name\n");
++		return ret;
++	}
++
++	ret = snd_soc_of_parse_audio_routing(card, "atmel,audio-routing");
++	if (ret) {
++		dev_err(&pdev->dev, "failed to parse audio routing\n");
++		return ret;
++	}
++
++	cpu_np = of_parse_phandle(np, "atmel,ssc-controller", 0);
++	if (!cpu_np) {
++		dev_err(&pdev->dev, "failed to get dai and pcm info\n");
++		ret = -EINVAL;
++		return ret;
++	}
++	dailink->cpu_of_node = cpu_np;
++	dailink->platform_of_node = cpu_np;
++	of_node_put(cpu_np);
++
++	codec_np = of_parse_phandle(np, "atmel,audio-codec", 0);
++	if (!codec_np) {
++		dev_err(&pdev->dev, "failed to get codec info\n");
++		ret = -EINVAL;
++		return ret;
++	}
++	dailink->codec_of_node = codec_np;
++	of_node_put(codec_np);
++
++	return 0;
++}
++
++static int atmel_asoc_generic_probe(struct platform_device *pdev)
++{
++	struct snd_soc_card *card = &atmel_asoc_generic_card;
++	struct snd_soc_dai_link *dailink = &atmel_asoc_generic_dailink;
++	int id, ret;
++
++	card->dev = &pdev->dev;
++	ret = atmel_asoc_generic_dt_init(pdev);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to init dt info\n");
++		return ret;
++	}
++
++	id = of_alias_get_id((struct device_node *)dailink->cpu_of_node, "ssc");
++	ret = atmel_ssc_set_audio(id);
++	if (ret != 0) {
++		dev_err(&pdev->dev, "failed to set SSC %d for audio\n", id);
++		return ret;
++	}
++
++	ret = snd_soc_register_card(card);
++	if (ret) {
++		dev_err(&pdev->dev, "snd_soc_register_card failed\n");
++		goto err_set_audio;
++	}
++
++	return 0;
++
++err_set_audio:
++	atmel_ssc_put_audio(id);
++	return ret;
++}
++
++static int atmel_asoc_generic_remove(struct platform_device *pdev)
++{
++	struct snd_soc_card *card = platform_get_drvdata(pdev);
++	struct snd_soc_dai_link *dailink = &atmel_asoc_generic_dailink;
++	int id;
++
++	id = of_alias_get_id((struct device_node *)dailink->cpu_of_node, "ssc");
++
++	snd_soc_unregister_card(card);
++	atmel_ssc_put_audio(id);
++
++	return 0;
++}
++
++#ifdef CONFIG_OF
++static const struct of_device_id atmel_asoc_generic_dt_ids[] = {
++	{ .compatible = "atmel,asoc-generic", },
++	{ }
++};
++#endif
++
++static struct platform_driver atmel_asoc_generic_driver = {
++	.driver = {
++		.name = "atmel-generic-audio",
++		.of_match_table = of_match_ptr(atmel_asoc_generic_dt_ids),
++	},
++	.probe = atmel_asoc_generic_probe,
++	.remove = atmel_asoc_generic_remove,
++};
++
++module_platform_driver(atmel_asoc_generic_driver);
++
++/* Module information */
++MODULE_AUTHOR("Pietro Lorefice <pietro@develer.com>");
++MODULE_DESCRIPTION("ALSA SoC machine driver for Atmel SoC and generic SSC devices");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index a68d173..bacc9c3 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -61,6 +61,7 @@ config SND_SOC_ALL_CODECS
+ 	select SND_SOC_BT_SCO
+ 	select SND_SOC_ES8328_SPI if SPI_MASTER
+ 	select SND_SOC_ES8328_I2C if I2C
++	select SND_SOC_GENERIC
+ 	select SND_SOC_ISABELLE if I2C
+ 	select SND_SOC_JZ4740_CODEC
+ 	select SND_SOC_LM4857 if I2C
+@@ -425,6 +426,9 @@ config SND_SOC_ES8328_SPI
+ 	tristate
+ 	select SND_SOC_ES8328
+ 
++config SND_SOC_GENERIC
++	tristate
++
+ config SND_SOC_ISABELLE
+         tristate
+ 
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 5dce451..712f0be 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -53,6 +53,7 @@ snd-soc-dmic-objs := dmic.o
+ snd-soc-es8328-objs := es8328.o
+ snd-soc-es8328-i2c-objs := es8328-i2c.o
+ snd-soc-es8328-spi-objs := es8328-spi.o
++snd-soc-generic-objs := generic.o
+ snd-soc-isabelle-objs := isabelle.o
+ snd-soc-jz4740-codec-objs := jz4740.o
+ snd-soc-l3-objs := l3.o
+@@ -229,6 +230,7 @@ obj-$(CONFIG_SND_SOC_DMIC)	+= snd-soc-dmic.o
+ obj-$(CONFIG_SND_SOC_ES8328)	+= snd-soc-es8328.o
+ obj-$(CONFIG_SND_SOC_ES8328_I2C)+= snd-soc-es8328-i2c.o
+ obj-$(CONFIG_SND_SOC_ES8328_SPI)+= snd-soc-es8328-spi.o
++obj-$(CONFIG_SND_SOC_GENERIC)	+= snd-soc-generic.o
+ obj-$(CONFIG_SND_SOC_ISABELLE)	+= snd-soc-isabelle.o
+ obj-$(CONFIG_SND_SOC_JZ4740_CODEC)	+= snd-soc-jz4740-codec.o
+ obj-$(CONFIG_SND_SOC_L3)	+= snd-soc-l3.o
+diff --git a/sound/soc/codecs/generic.c b/sound/soc/codecs/generic.c
+new file mode 100644
+index 0000000..2866108
+--- /dev/null
++++ b/sound/soc/codecs/generic.c
+@@ -0,0 +1,91 @@
++/*
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ *
++ */
++
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/tlv.h>
++
++static const struct snd_soc_dapm_widget generic_dapm_widgets[] = {
++	SND_SOC_DAPM_OUTPUT("DOUT"),
++};
++
++static const struct snd_soc_dapm_route generic_dapm_routes[] = {
++	{"DOUT", NULL, "Data out"},
++};
++
++static struct snd_soc_dai_driver generic_dai = {
++	.name = "generic",
++	.playback = {
++		.stream_name	= "Data out",
++		.channels_min	= 1,
++		.channels_max	= 1,
++		.rates		= SNDRV_PCM_RATE_8000_192000,
++		.formats	= SNDRV_PCM_FMTBIT_S16_LE
++				| SNDRV_PCM_FMTBIT_S24_LE
++				| SNDRV_PCM_FMTBIT_S32_LE,
++	},
++};
++
++static struct snd_soc_codec_driver soc_generic = {
++	.dapm_widgets		= generic_dapm_widgets,
++	.num_dapm_widgets	= ARRAY_SIZE(generic_dapm_widgets),
++	.dapm_routes		= generic_dapm_routes,
++	.num_dapm_routes	= ARRAY_SIZE(generic_dapm_routes),
++};
++
++static int generic_dev_probe(struct platform_device *pdev)
++{
++	return snd_soc_register_codec(&pdev->dev,
++			&soc_generic, &generic_dai, 1);
++}
++
++static int generic_dev_remove(struct platform_device *pdev)
++{
++	snd_soc_unregister_codec(&pdev->dev);
++	return 0;
++}
++
++MODULE_ALIAS("platform:generic-codec");
++
++static const struct of_device_id generic_of_ids[] = {
++	{ .compatible = "develed,ssc-generic" },
++	{ /* sentinel */ },
++};
++
++MODULE_DEVICE_TABLE(of, generic_of_ids);
++
++static struct platform_driver generic_driver = {
++	.driver = {
++		.name = "ssc-generic",
++		.owner = THIS_MODULE,
++		.of_match_table = generic_of_ids,
++	},
++	.probe = generic_dev_probe,
++	.remove = generic_dev_remove,
++};
++
++module_platform_driver(generic_driver);
++
++MODULE_DESCRIPTION("Generic SSC driver");
++MODULE_AUTHOR("Pietro Lorefice <pietro@develer.com>");
++MODULE_LICENSE("GPL");
+-- 
+2.9.3
+

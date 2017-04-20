@@ -1,0 +1,58 @@
+From cf5384786ca635779ed7d0ac83ef95566d791ffd Mon Sep 17 00:00:00 2001
+From: Pietro Lorefice <pietro@develer.com>
+Date: Thu, 20 Apr 2017 09:52:57 +0200
+Subject: [PATCH] develed: add support for WiFi
+
+---
+ .../boot/dts/at91-sama5d4_develboard_develed.dts   | 28 ++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts b/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
+index d4a72b1..d1f0d7b 100644
+--- a/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard_develed.dts
+@@ -50,6 +50,27 @@
+ 
+ 	ahb {
+ 		apb {
++			mmc0: mmc@f8000000 {
++				pinctrl-names = "default";
++				pinctrl-0 = <&pinctrl_mmc0_clk_cmd_dat &pinctrl_wlan_irq>;
++				status = "okay";
++
++				non-removable;
++				cap-power-off-card;
++				keep-power-in-suspend;
++
++				slot@1 {
++					compatible = "ti,wilink8";
++					reg = <1>;
++					bus-width = <4>;
++					interrupt-parent = <&pioE>;
++					interrupts = <8 IRQ_TYPE_EDGE_RISING>;
++					wlan-pwr-gpio = <&pioB 29 GPIO_ACTIVE_HIGH>;
++					wlan-en-gpio = <&pioD 26 GPIO_ACTIVE_HIGH>;
++					status = "okay";
++				};
++			};
++
+ 			pinctrl@fc06a000 {
+ 				pwm0 {
+ 					pinctrl_pwm0: pwm0_ssc {
+@@ -59,6 +80,13 @@
+ 						>;
+ 					};
+ 				};
++				wifi {
++					pinctrl_wlan_irq: wlan_irq {
++						atmel,pins = <
++							AT91_PIOE 8 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_DOWN  /* WLAN_IRQ */
++						>;
++					};
++				};
+ 			};
+ 		};
+ 	};
+-- 
+2.9.3
+
