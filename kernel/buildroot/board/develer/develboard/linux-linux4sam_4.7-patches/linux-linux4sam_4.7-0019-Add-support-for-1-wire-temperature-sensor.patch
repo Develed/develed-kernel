@@ -1,0 +1,42 @@
+From 6265b34407ea7d865a01da816a89eeef529988d2 Mon Sep 17 00:00:00 2001
+From: Daniele Basile <asterix@develer.com>
+Date: Thu, 21 Sep 2017 13:53:17 +0200
+Subject: [PATCH] Add support for 1-wire temperature sensor
+
+---
+ arch/arm/boot/dts/at91-sama5d4_develboard.dts | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard.dts b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+index 1f24de7..c7e6d7b 100644
+--- a/arch/arm/boot/dts/at91-sama5d4_develboard.dts
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+@@ -179,6 +179,13 @@
+ 						>;
+ 					};
+ 				};
++				w1 {
++					pinctrl_w1_ctrl: w1_ctrl {
++						atmel,pins = <
++							  AT91_PIOE 28 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP
++						>;
++					};
++				};
+ 			};
+ 		};
+ 
+@@ -251,4 +258,11 @@
+ 			linux,default-trigger = "heartbeat";
+ 		};
+ 	};
++	onewire@0 {
++		pinctrl-names = "default";
++		pinctrl-0 = <&pinctrl_w1_ctrl>;
++		compatible = "w1-gpio";
++		gpios = <&pioE 28 GPIO_ACTIVE_LOW>;
++		status = "okay";
++	};
+ };
+-- 
+2.7.4
+
