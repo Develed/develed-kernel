@@ -1,0 +1,30 @@
+From 7323fba4db804ae7aff246ffaf2ba2420979e456 Mon Sep 17 00:00:00 2001
+From: Daniele Basile <asterix@develer.com>
+Date: Fri, 22 Sep 2017 15:21:10 +0200
+Subject: [PATCH] Enable pressure sensor BMP180 on i2c bus.
+
+---
+ arch/arm/boot/dts/at91-sama5d4_develboard.dts | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/arch/arm/boot/dts/at91-sama5d4_develboard.dts b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+index c7e6d7b..c8e7444 100644
+--- a/arch/arm/boot/dts/at91-sama5d4_develboard.dts
++++ b/arch/arm/boot/dts/at91-sama5d4_develboard.dts
+@@ -136,6 +136,13 @@
+ 					pagesize = <1>;
+ 					read-only;
+ 				};
++				pressure@77 {
++					compatible = "bosch,bmp085";
++					reg = <0x77>;
++					chip-id = <0x55>;
++					temp-measurement-period = <100>;
++					default-oversampling = <2>;
++				};
+ 			};
+ 
+ 			adc0: adc@fc034000 {
+-- 
+2.7.4
+
